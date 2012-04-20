@@ -1,0 +1,10 @@
+build
+*.pyc
+
+# In the case of using the source directory as a working copy direct.
+disable-groups
+disable-rules
+enable-groups
+enable-rules
+drop-rules
+ruleman.conf
