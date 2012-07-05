@@ -4,6 +4,7 @@ from unittest import TextTestRunner, TestLoader
 import subprocess
 import sys
 import os
+import time
 
 # For unit tests.
 sys.path.insert(0, "./lib")
@@ -27,6 +28,10 @@ class TestCommand(Command):
     def run(self):
         tests = TestLoader().loadTestsFromModule(ruleman.test)
         TextTestRunner(verbosity=2).run(tests)
+
+build_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime())
+open("lib/ruleman/_buildtime.py", "w").write(
+    "__buildtime__ = '%s'" % (build_time))
 
 setup(name="ruleman",
       version=version,

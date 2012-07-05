@@ -23,6 +23,7 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import os
 import tarfile
 import fnmatch
 import hashlib
@@ -52,3 +53,10 @@ def get_md5_file(filename):
     m = hashlib.md5()
     m.update(open(filename).read())
     return m.hexdigest()
+
+def write_file_mkdir(filename, contents):
+    """ Write out a file creating parent directories as needed. """
+    dirname = os.path.dirname(filename)
+    if dirname and not os.path.isdir(dirname):
+        os.makedirs(dirname)
+    open(filename, "w").write(contents)

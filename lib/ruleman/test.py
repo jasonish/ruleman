@@ -26,6 +26,7 @@
 import unittest
 
 import fetch
+import rules
 
 class TestFetch(unittest.TestCase):
 
@@ -41,6 +42,16 @@ class TestFetch(unittest.TestCase):
 
         url = "http://rules.emergingthreatspro.com/XXXXXXXXXXXXXXX/suricata/etpro.rules.tar.gz"
         self.assertEqual(fetch.guess_md5_url(url), url + ".md5")
+
+class TestRuleParsing(unittest.TestCase):
+
+    def test_parse_metadata(self):
+
+        rule1 = """alert tcp $HOME_NET any -> $EXTERNAL_NET $HTTP_PORTS (msg:"ET CURRENT_EVENTS Request to .in FakeAV Campaign June 19 2012 exe or zip"; flow:established,to_server; content:"setup."; fast_pattern:only; http_uri; content:".in|0d 0a|"; http_header; pcre:"/\/[a-f0-9]{16}\/([a-z0-9]{1,3}\/)?setup\.(exe|zip)$/U"; pcre:"/^Host\x3a\s.+\.in\r?$/Hmi"; metadata:stage,hostile_download; reference:url,isc.sans.edu/diary/+Vulnerabilityqueerprocessbrittleness/13501; classtype:trojan-activity; sid:2014929; rev:1;)"""
+        metadata = rules.parse_metadata(rule1)
+        self.assertEqual(len(metadata), 2)
+        self.assertEqual(metadata[0], "stage");
+        self.assertEqual(metadata[1], "hostile_download")
 
 if __name__ == "__main__":
     unittest.main()

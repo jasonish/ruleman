@@ -1,0 +1,8 @@
+# List the rule groups you would like to completely disable here, one
+# per line.  Every rule in the groups listed here will be disabled.
+#
+# Matching is done based on filenames and shell wildcards are allowed.
+#
+# eg.
+#  rules/x11.rules
+#  rules/emerging-*

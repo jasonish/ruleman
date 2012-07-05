@@ -43,9 +43,14 @@ from ruleman import fetch
 from ruleman import rules
 from ruleman import util
 from ruleman import config
-from ruleman import _version
 from ruleman import init
 from ruleman import snort
+
+from ruleman import _version
+try:
+    from _buildtime import __buildtime__
+except:
+    __buildtime__ = None
 
 # Prefix to the precompiled SO rules.
 soPrefix = "so_rules/precompiled"
@@ -204,6 +209,13 @@ def exportProfile(profile, files, ruledb):
             elif filename.startswith("preproc_rules/"):
                 open("%s/preproc_rules/%s" % (prefix, basename), "w").write(
                     files[filename])
+        elif filename.startswith("rules/"):
+            # For convenience write out the non-rules files in rules/
+            # as found in ET rulesets.
+            dirname = os.path.dirname(filename)
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
+            open("%s/%s" % (prefix, filename), "w").write(files[filename])
     fusedOutput.close()
 
     # Write out SO lib files.
@@ -506,6 +518,48 @@ def cache_so_stubs(ruleset):
 
     pickle.dump(stubs, open(stub_cache_filename, "w"))
 
+def cmd_extract_ruleset(args):
+    
+    usage = """
+ruleman extract <ruleset> [filenames...]
+
+Extracts <ruleset> into the current directory. If filenames are
+provided only those files will be extracted.
+"""
+
+    if len(args) < 1:
+        print >>sys.stderr, usage
+        return 1
+    rulesetname = args[0]
+
+    # Each filename file is broken down into its path parts so
+    # matching, so we can match against a directory.
+    filenames = [[b for b in a.split("/") if b] for a in args[1:]]
+
+    rulesets = config.get_rulesets()
+    if rulesetname not in rulesets:
+        print >>sys.stderr, "Ruleset %s does not exist." % (rulesetname)
+        return 1
+
+    # Inner function to test is a filename matches the user provided
+    # list of filenames.
+    def is_match(filename):
+        if not filenames:
+            return True
+        for dst_filename in filenames:
+            if dst_filename == filename.split("/")[0:len(dst_filename)]:
+                return True
+        return False
+
+    file_count = 0
+    files = load_ruleset_files(rulesets[rulesetname])
+    for filename in [filename for filename in files if is_match(filename)]:
+            print("Extracting %s" % (filename))
+            util.write_file_mkdir(filename, files[filename])
+            file_count += 1
+    print("%s files extracted." % (
+            "No" if file_count == 0 else str(file_count)))
+
 commands = {
     "fetch": cmd_fetch,
     "export": cmd_export,
@@ -514,6 +568,7 @@ commands = {
     "init": init.init,
     "list-rulesets": cmd_list_rulesets,
     "list-os-types": cmd_list_os_types,
+    "extract": cmd_extract_ruleset,
 }
 
 def usage(output):
@@ -533,6 +588,11 @@ ruleman [options] <command>
 
 """)
 
+def print_version():
+    print("version %s" % (_version.__version__))
+    if __buildtime__:
+        print("built: %s" % (__buildtime__))
+
 def main(args):
 
     try:
@@ -545,7 +605,7 @@ def main(args):
             usage(sys.stdout)
             return 0
         elif o == "-V":
-            print("%s" % (_version.__version__))
+            print_version()
             return 0
 
     if args and args[0] == "init":

@@ -61,6 +61,17 @@ class Rule(object):
         else:
             return "# %s" % (rule)
 
+def parse_metadata(rulebuf):
+    """ Extract the metadata from a rule.  Returns a list where each
+    item is a metadata item. """
+
+    pattern = "metadata:\s?(.*?);"
+    match = re.search(pattern, rulebuf)
+    if match:
+        metadata = [m.strip() for m in match.group(1).split(",")]
+        return metadata
+    return []
+
 def parseRule(line):
 
     line = line.strip()
@@ -102,11 +113,11 @@ def parseRule(line):
                 rule.flowbitsUsed.append(parts[1])
             else:
                 print("WARNING: Unknown flowbit keyword: %s" % (parts[0]))
-
-    metadataMatch = re.search("metadata:\s?(.*?);", line)
-    if metadataMatch:
-        metadata = [m.strip() for m in metadataMatch.group(1).split(",")]
-        for m in metadata:
+                
+    metadata = parse_metadata(line)
+    for m in metadata:
+        # Extract policy information into its own field.
+        if m.startswith("policy"):
             key, val = [s.strip() for s in string.split(m, " ", maxsplit=1)]
             if key == "policy":
                 parts = [s.strip() for s in val.split(" ")]
