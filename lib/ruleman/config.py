@@ -27,11 +27,10 @@ import os
 import string
 import ConfigParser
 
-from ruleman import exceptions
+CONFIG_FILENAME  = "ruleman.conf"
 
 DATA_DIR         = "."
 RULESET_DATA_DIR = "%s/rulesets" % DATA_DIR
-STUB_CACHE_EXT   = "stubcache"
 
 # Default check interval in seconds.
 DEFAULT_CHECK_INTERVAL = 900
@@ -88,6 +87,9 @@ snort_ctx_template = {
     "dynamic-engine": None,
     "os-type": None,
 }
+
+class NoConfigurationFileException(Exception):
+    pass
 
 def load_section(section, list_options=[], bool_options=[], int_options=[]):
 
@@ -194,8 +196,11 @@ def get(section, option, default=None):
     else:
         return default
 
-def init(configFilename):
+def get_ruleset_dir(ruleset_ctx):
+    return "%s/%s" % (RULESET_DATA_DIR, ruleset_ctx["name"])
+
+def init(config_filename=CONFIG_FILENAME):
     global config
     config = ConfigParser.SafeConfigParser(DEFAULTS)
-    if configFilename not in config.read(configFilename):
-        raise exceptions.NoConfigurationFileException()
+    if config_filename not in config.read(config_filename):
+        raise NoConfigurationFileException()

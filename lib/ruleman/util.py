@@ -28,8 +28,9 @@ import tarfile
 import fnmatch
 import hashlib
 import logging
+from cStringIO import StringIO
 
-def multiFnMatch(name, patterns):
+def multi_fnmatch(name, patterns):
     for p in patterns:
         if fnmatch.fnmatch(name, p):
             return True
@@ -42,10 +43,11 @@ def tar_to_dict(filename, exclude=[]):
     tf = tarfile.open(filename)
     for member in tf:
         if member.isreg():
-            if multiFnMatch(member.name, exclude):
+            if multi_fnmatch(member.name, exclude):
                 logging.debug("Excluding file %s." % (member.name))
                 continue
             files[member.name] = tf.extractfile(member).read()
+    tf.close()
     return files
 
 def get_md5_file(filename):
