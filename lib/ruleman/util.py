@@ -28,37 +28,79 @@ import tarfile
 import fnmatch
 import hashlib
 import logging
-from cStringIO import StringIO
+import tempfile
+import atexit
+import shutil
+import subprocess
 
-def multi_fnmatch(name, patterns):
-    for p in patterns:
-        if fnmatch.fnmatch(name, p):
-            return True
-    return False
+logger = logging.getLogger("ruleman.util")
 
-def tar_to_dict(filename, exclude=[]):
+def rmpath(path):
+    """ Remove the given path, whether it is a directory or a
+    file. """
+    if os.path.exists(path):
+        if os.path.isdir(path):
+            logger.debug("Removing directory %s" % (path))
+            shutil.rmtree(path)
+        else:
+            logger.debug("Removing file %s" % (path))
+            os.unlink(path)
+
+def get_tmpdir():
+    """ Create a temporary directory that will be cleaned up on
+    exit. """
+    tmpdir = tempfile.mkdtemp(prefix="ruleman.tmp")
+    atexit.register(rmpath, tmpdir)
+    return tmpdir
+
+def get_tmpfilename(suffix=''):
+    """ Basically a wrapper around tempfile.mkstemp that registers a
+    cleanup hook. """
+    tmpfd, tmpname = tempfile.mkstemp(prefix="ruleman.tmp", suffix=suffix)
+    atexit.register(rmpath, tmpname)
+    return tmpname
+
+def tar_to_dict(filename):
     """ Convert a tarfile to a dictionary of files keyed by
     filename. """
     files = {}
     tf = tarfile.open(filename)
     for member in tf:
         if member.isreg():
-            if multi_fnmatch(member.name, exclude):
-                logging.debug("Excluding file %s." % (member.name))
-                continue
             files[member.name] = tf.extractfile(member).read()
     tf.close()
     return files
 
-def get_md5_file(filename):
-    """ Get the MD5 checksum of a file specified by filename. """
-    m = hashlib.md5()
-    m.update(open(filename).read())
-    return m.hexdigest()
+def archive_to_dict(filename):
+    return tar_to_dict(filename)
 
-def write_file_mkdir(filename, contents):
-    """ Write out a file creating parent directories as needed. """
-    dirname = os.path.dirname(filename)
-    if dirname and not os.path.isdir(dirname):
-        os.makedirs(dirname)
-    open(filename, "w").write(contents)
+def createfile(filename, mkdirs=False):
+    """ Create and and open a new file optionally creating all parent
+    directories as needed. """
+    if mkdirs:
+        dirname = os.path.dirname(filename)
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+    return open(filename, "w")
+
+def extract_archive_tar(filename, path):
+    """ Specific variant of extract_archive for tar files. """
+    tf = tarfile.open(filename)
+    tf.extractall(path=path)
+    tf.close()
+
+def extract_archive(filename, path):
+    """ Extract archive named in filename to the provided path. """
+    return extract_archive_tar(filename, path)
+
+def create_archive_targz(filename, path):
+    """ Specific variant of create_archive for creating .tar.gz
+    archives. """
+    files = " ".join(["'%s'" % f for f in os.listdir(path)])
+    args = "tar zcf %s -C %s %s" % (filename, path, files)
+    subprocess.check_call(args, shell=True)
+    
+def create_archive(filename, path):
+    """ Create an archive named filename containing the contents of
+    the provided path. """
+    return create_archive_targz(filename, path)

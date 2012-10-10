@@ -23,25 +23,33 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import sys
+import os
 import unittest
+import io
 
-import fetch
-import rules
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from ruleman import fetch
+from ruleman import rules
+from ruleman import config
+from ruleman import core
+from ruleman import rulematcher
 
 class TestFetch(unittest.TestCase):
 
-    def test_guess_md5_url(self):
+    def test_get_md5_url(self):
         
-        url = "http://www.snort.org/sub-rules/snortrules-snapshot-2921.tar.gz/XXXXXX"
+        url = "http://www.snort.org/snortrules-snapshot-2921.tar.gz/XXXXXX"
         expected = url.replace(".tar.gz", ".tar.gz.md5")
-        got = fetch.guess_md5_url(url)
+        got = fetch.get_md5_url({"url": url})
         self.assertEqual(got, expected)
 
-        url = "http://rules.emergingthreats.net/open-nogpl/snort-2.9.0/emerging.rules.tar.gz"
-        self.assertEqual(fetch.guess_md5_url(url), url + ".md5")
+        url = "http://rules.emergingthreats.net/emerging.rules.tar.gz"
+        self.assertEqual(fetch.get_md5_url({"url": url}), url + ".md5")
 
-        url = "http://rules.emergingthreatspro.com/XXXXXXXXXXXXXXX/suricata/etpro.rules.tar.gz"
-        self.assertEqual(fetch.guess_md5_url(url), url + ".md5")
+        url = "http://emergingthreatspro.com/XXXXXXXXXXXXXXX/etpro.rules.tar.gz"
+        self.assertEqual(fetch.get_md5_url({"url": url}), url + ".md5")
 
 class TestRuleParsing(unittest.TestCase):
 
@@ -52,6 +60,210 @@ class TestRuleParsing(unittest.TestCase):
         self.assertEqual(len(metadata), 2)
         self.assertEqual(metadata[0], "stage");
         self.assertEqual(metadata[1], "hostile_download")
+
+    def test_parse_policy(self):
+        raw = """alert TCP $HOME_NET any -> $EXTERNAL_NET any (msg:"TEST rule"; flow:established,to_server; metadata:policy balanced-ips alert, policy security-ips drop, service http; sid:999999; rev:1;)"""
+        rule = rules.parse_rule(raw)
+        self.assertTrue("balanced-ips" in rule.policies)
+        self.assertEquals("alert", rule.policies["balanced-ips"])
+        self.assertTrue("security-ips" in rule.policies)
+        self.assertEquals("drop", rule.policies["security-ips"])
+
+class TestConfig(unittest.TestCase):
+
+    test_config = u"""
+[DEFAULT]
+ignore-files = ignore1.rules, ignore2.rules, ignore3.rules
+
+[load section test]
+string = some string value
+int-value = 1
+a list of strings = one, two, three
+bool-yes = yes
+bool-no = no
+bool-one = 1
+bool-zero = 0
+bool-true = true
+bool-false = false
+
+[ruleset partial]
+url = some url
+
+[ruleset complete]
+url = some url
+md5-url = md5url
+
+[ruleset without_ignore_files]
+
+[ruleset with_empty_ignore_files]
+ignore-files =
+
+[ruleset with_ignore_files]
+ignore-files = one.rules, two.rules, three.rules
+"""
+
+    def setUp(self):
+        config.loadfp(io.StringIO(TestConfig.test_config))
+
+    def test_load_section_basic(self):
+        section = config.get_section("load section test")
+        self.assertEquals("some string value", section["string"])
+
+    def test_load_section_with_xforms(self):
+        xforms = {"int-value": int,
+                  "a list of strings": config.xform_stringlist}
+        section = config.get_section("load section test", xforms=xforms)
+        self.assertEquals(int, type(section["int-value"]))
+        self.assertEquals(list, type(section["a list of strings"]))
+        self.assertEquals(3, len(section["a list of strings"]))
+        self.assertEquals("one", section["a list of strings"][0])
+
+    def test_load_section_bool_xform(self):
+        xforms = {"bool-yes": config.xform_bool,
+                  "bool-no": config.xform_bool,
+                  "bool-one": config.xform_bool,
+                  "bool-zero": config.xform_bool,
+                  "bool-true": config.xform_bool,
+                  "bool-false": config.xform_bool,
+                  }
+        section = config.get_section("load section test", xforms=xforms)
+        self.assertTrue(section["bool-yes"])
+        self.assertFalse(section["bool-no"])
+        self.assertTrue(section["bool-one"])
+        self.assertFalse(section["bool-zero"])
+        self.assertTrue(section["bool-true"])
+        self.assertFalse(section["bool-false"])
+
+    def test_get_ruleset_unknown(self):
+        self.assertRaises(
+            config.NoRulesetError,
+            config.get_ruleset, "unknown-ruleset-name")
+
+    def test_get_ruleset_partial(self):
+        ruleset = config.get_ruleset("partial")
+        self.assertEquals("some url", ruleset["url"])
+
+        # Verify that md5-url does not exist.  The non-existence of it
+        # means we should guess it.  If it exists we use it, unless
+        # its value is None (or an empty string will do), then we
+        # don't check for an MD5 at all.
+        self.assertFalse("md5-url" in ruleset)
+
+    def test_get_ruleset_complete(self):
+        ruleset = config.get_ruleset("complete")
+        self.assertEquals("some url", ruleset["url"])
+        self.assertEquals("md5url", ruleset["md5-url"])
+
+    def test_get_rulesets(self):
+        rulesets = config.get_rulesets()
+        self.assertTrue("partial" in rulesets)
+        self.assertTrue("complete" in rulesets)
+
+    def test_get_ruleset_without_ignore_files(self):
+        # This ruleset did not have an ignore-files section.  We should get
+        # the one provided by the [DEFAULT].
+        r = config.get_ruleset("without_ignore_files")
+        self.assertEquals(["ignore1.rules", "ignore2.rules", "ignore3.rules"],
+                          r["ignore-files"])
+
+    def test_get_ruleset_with_empty_ignore_files(self):
+        # As this configuration provided an ignore-files with no
+        # value, we should not get the default.
+        r = config.get_ruleset("with_empty_ignore_files")
+        self.assertEquals([], r["ignore-files"])
+
+    def test_get_ruleset_with_ignore_files(self):
+        # This ruleset provided its own rule files.
+        r = config.get_ruleset("with_ignore_files")
+        self.assertEquals(["one.rules", "two.rules", "three.rules"],
+                          r["ignore-files"])
+
+class MockRule(object):
+    
+    def __init__(self, gid=None, sid=None, group=None):
+        self.gid = gid
+        self.sid = sid
+        self.group = group
+
+class TestRuleIdRuleMatcher(unittest.TestCase):
+
+    def test_single_ruleid(self):
+        matchers = rulematcher.parse_rule_id_matchers("1:412")
+
+        self.assertEquals(1, len(matchers))
+
+        self.assertEquals(1, matchers[0].gid)
+        self.assertEquals(412, matchers[0].sid)
+        
+        self.assertTrue(matchers[0].match(MockRule(gid=1, sid=412)))
+
+    def test_multiple_ruleid(self):
+        matchers = rulematcher.parse_rule_id_matchers("1:412,3:100019, 119:223")
+        self.assertEquals(3, len(matchers))
+
+        self.assertEquals(1, matchers[0].gid)
+        self.assertEquals(412, matchers[0].sid)
+        self.assertTrue(matchers[0].match(MockRule(gid=1, sid=412)))
+
+        self.assertEquals(3, matchers[1].gid)
+        self.assertEquals(100019, matchers[1].sid)
+        self.assertTrue(matchers[1].match(MockRule(gid=3, sid=100019)))
+
+        self.assertEquals(119, matchers[2].gid)
+        self.assertEquals(223, matchers[2].sid)
+        self.assertTrue(matchers[2].match(MockRule(gid=119, sid=223)))
+
+    def test_bad_ruleid(self):
+        self.assertRaises(
+            rulematcher.InvalidRuleMatchError,
+            rulematcher.parse_rule_id_matchers, "1:asdf")
+        
+        self.assertRaises(
+            rulematcher.InvalidRuleMatchError,
+            rulematcher.parse_rule_id_matchers, "1:412, 1:*")
+
+class TestGroupNameMatcher(unittest.TestCase):
+
+    def test_single_group(self):
+        matchers = rulematcher.parse_group_name_matchers("group:icmp.rules")
+        self.assertEquals(1, len(matchers))
+        self.assertTrue(matchers[0].match(MockRule(group="icmp.rules")))
+
+    def test_multi_group(self):
+        matchers = rulematcher.parse_group_name_matchers(
+            "group:icmp.rules,x11.rules, emerging-malware.rules")
+        self.assertEquals(3, len(matchers))
+        self.assertTrue(matchers[0].match(MockRule(group="icmp.rules")))
+        self.assertTrue(matchers[1].match(MockRule(group="x11.rules")))
+        self.assertTrue(matchers[2].match(MockRule(
+                    group="emerging-malware.rules")))
+
+class TestRuleMatcherCollection(unittest.TestCase):
+
+    def test_basic(self):
+        input = io.StringIO(u"""
+# Some comment.
+1:412
+3:999, 119:223
+
+# A group..
+group:icmp.rules
+
+# Multiple groups.
+group: x11.rules, emerging-malware.rules
+""")
+        matchers = rulematcher.load_collection_from_fp(input)
+
+        self.assertTrue(matchers.match(MockRule(gid=1, sid=412)))
+        self.assertTrue(matchers.match(MockRule(gid=3, sid=999)))
+        self.assertTrue(matchers.match(MockRule(gid=119, sid=223)))
+        self.assertTrue(matchers.match(MockRule(group="icmp.rules")))
+        self.assertTrue(matchers.match(MockRule(group="x11.rules")))
+        self.assertTrue(matchers.match(MockRule(
+                    group="emerging-malware.rules")))
+
+        self.assertFalse(matchers.match(MockRule(gid=1, sid=413)))
+        self.assertFalse(matchers.match(MockRule(group="deleted.rules")))
 
 if __name__ == "__main__":
     unittest.main()

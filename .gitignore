@@ -1,3 +1,11 @@
 build
 *.pyc
 lib/ruleman/_buildtime.py
+
+# For running out of the working directory.
+disable-rules
+enable-rules
+drop-rules
+ruleman.conf
+profiles
+rulesets

@@ -11,20 +11,11 @@ deployment and is attempt to clean them up and give them a consistent
 feel.  As such, the commands, and files used by this program may
 change drastically.
 
-QUICKSTART
-----------
+REQUIREMENTS
+------------
 
-* Unpack the distribution archive or clone ruleman from the git
-  repository. 
-
-* Create a directory to store your configuration and data files in.
-
-  - mkdir ruleman-data
-  - /path/to/ruleman init
-  
-* Modify ruleman.conf to meet your needs.  Note that Snort specific
-  parameters are only required for SO stub generation which you may
-  not need to do.
+Ruleman only depends on a standard installation of Python 2.6 or
+Python 2.7.  It currently does not run on Python 3.
 
 INSTALLATION
 ------------
@@ -33,55 +24,73 @@ While ruleman does not require installation to work properly, it can
 be installed like so:
 
     python setup.py build
+
     sudo python setup.py install
     
-An alternative to installation is to just create a shell alias to
-alias "ruleman" to the full path of where you expanded (or checked
-out) the ruleman distribution.
+Installing it will make it available on the standard.
+
+Alternatively you could call ruleman using the full path to the
+ruleman program or put the ruleman project directory on your path or
+create a shell alias.
 
 USAGE
 -----
 
-Ruleman expects to be run from the directory containing ruleman.conf.
+### Initialize a Ruleman Working Directory
 
-To download and export rules for each profile:
+Before ruleman can be used it needs a set of configuration files.
+These files can be created for you using the "init" command:
 
-    /path/to/ruleman update
+    ruleman init [dir]
+	
+If [dir] is not provided the current directory will be initialized as
+a ruleman working directory.
+
+### Configuration
+
+Before continuuing you will need to edit ruleman.conf.  You will need
+to add at least one [ruleset <name>] configuration as well as a
+profile section.
+
+### Fetching Rules
+
+The fetch command will only fetch the rules without deploying them:
+
+    ruleman fetch
+
+### Deploying Rules
+
+To deploy rules without doing a fetch run the deploy command:
+
+	ruleman deploy
+	
+### Fetching and Deploying Rules
+
+To fetch and deploy the rules using a single command:
     
-To just download the rulesets:
+	ruleman update
 
-    /path/to/ruleman fetch
+OTHER NOTES
+-----------
+- The rules for a profile are deployed to the directory
+  ./profiles/default.  I may add support for multiple profiles in
+  which case 'default' will be replaced with the profile name.
 
-To export the rules for each profile:
+- If a profile contains an "os-type" parameter, ruleman will attempt
+  to create a symlink named "dynamicrules" in the root of the deployed
+  profile directory to the directory containing the dynamic rules for
+  that OS type and Snort version.
 
-    /path/to/ruleman export
+- The configuration file is based on Python's ConfigParser module, so
+  can use all the features provided by it.
   
-To search for a rule (requires that a fetch has already been done):
+- Rule modifications are performed in the following order:
 
-    /path/to/ruleman search
+  - disable rules
+  - enable rules
+  - drop rules
+  
+  Making the order configurable may be an option in the future.
+  
+- There is currently no way to modify rules.
 
-TODO and IDEAS
---------------
-- Allow a profile to be listed in place of rulesets in a given profile
-  to allow a sort of inheritance.
-- Support for local files.
-- Command for changing configuration (like git config).
-  - NOTE: Will probably lose the ability to comment the config file if
-    a tool is modifying it.
-- Post export hooks.
-- Cache regenerated SO rule stubs as part of the fetch phase do avoid
-  regeneration when just exporting the rules after a change such as an
-  enable/disable.
-- Pack the output of a profile into a .tar.gz.
-- Users supplied rule transformations..
-  - Keep it simple, user supplies a function that each rule is passed
-    to, and the function can decide to modify it or not.
-- Purge old downloaded rulesets after a time period or file count.
-- Ability to set latest back to an older ruleset.
-- Move from multiple instruction files (eg. enable-rules,
-  disable-rules) to a single file where each line is prefixed with an
-  instruction type.
-- Disable/enable rules based on a regex.
-- Command to disable/enable rules.
-  - Logs a reason, and a date of the modification.
-- Initial setup wizard.

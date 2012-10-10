@@ -1,8 +1,4 @@
 # Rules to enable.
 #
-# This file contains a list rules one per line.  Currently the format
-# is <gid>:<sid> and the GID is required.
-#
-# eg.
-#   1:412
-#   3:12999
+# See disable-rules for examples on how to specify rules to enable.
+

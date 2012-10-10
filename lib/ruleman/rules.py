@@ -23,36 +23,46 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import string
 import re
-try: from cStringIO import StringIO
-except: from StringIO import StringIO
+import logging
+import types
+import io
+
+logger = logging.getLogger("ruleman.rules")
 
 # Regular expressesions for parsing Snort rules.
-rulePattern = re.compile("^#?\s?((alert|pass)\s+(.*sid:\s?(\d+).*$))")
-gidPattern = re.compile("gid:\s*(\d+)")
-flowbitPattern = re.compile("flowbits:(.*?);")
-msgPattern = re.compile("msg:\s*\"(.*?)\s*\";")
-referencePattern = re.compile("reference:\s*(.*?)\s*;")
-
-fbProvidedKeywords = ["set", "unset", "reset"]
-fbUsedKeywords = ["isset", "isnotset"]
+rule_pattern      = re.compile("^#?\s?((alert|pass)\s+(.*sid:\s?(\d+).*$))")
+gid_pattern       = re.compile("gid:\s*(\d+)")
+flowbit_pattern   = re.compile("flowbits:(.*?);")
+msg_pattern       = re.compile("msg:\s*\"(.*?)\s*\";")
+reference_pattern = re.compile("reference:\s*(.*?)\s*;")
+metadata_pattern  = re.compile("metadata:\s?(.*?);")
 
 class Rule(object):
     """ Class to represent an individual Snort rule. """
     
-    def __init__(self):
+    def __init__(self, group=None):
+        self.group = group
         self.enabled = False
         self.action = None
         self.body = None
         self.gid = 1
         self.sid = 0
-        self.flowbitsProvided = []
-        self.flowbitsUsed = []
-        self.noalert = False
-        self.group = None
         self.policies = {}
         self.references = []
+        self.metadata = []
+        self.flowbits = []
+        self.flowbits_checked = []
+        self.flowbits_set = []
+
+    @property
+    def key(self):
+        return (self.gid, self.sid)
+
+    def brief(self):
+        """ Return a string containing the brief description of the
+        rule. """
+        return "[%d:%d] %s" % (self.gid, self.sid, self.msg)
 
     def __str__(self):
         rule = "%s %s" % (self.action, self.body)
@@ -61,64 +71,33 @@ class Rule(object):
         else:
             return "# %s" % (rule)
 
-def parse_metadata(rulebuf):
+def parse_msg(buf):
+    m = msg_pattern.search(buf)
+    if m:
+        return m.group(1)
+    return None
+
+def parse_gid(buf, default=None):
+    m = gid_pattern.search(buf)
+    if m:
+        return int(m.group(1))
+    return default
+
+def parse_metadata(buf):
     """ Extract the metadata from a rule.  Returns a list where each
     item is a metadata item. """
-
-    pattern = "metadata:\s?(.*?);"
-    match = re.search(pattern, rulebuf)
-    if match:
-        metadata = [m.strip() for m in match.group(1).split(",")]
+    m = metadata_pattern.search(buf)
+    if m:
+        metadata = [m.strip() for m in m.group(1).split(",")]
         return metadata
     return []
 
-def parseRule(line):
-
-    line = line.strip()
-    m = rulePattern.match(line)
-    if not m:
-        return None
-
-    rule = Rule()
-    rule.enabled = not line.startswith("#")
-    rule.body = m.group(3)
-    rule.action = m.group(2)
-    rule.sid = int(m.group(4))
-
-    m = msgPattern.search(line)
-    if m:
-        rule.msg = m.group(1)
-    else:
-        print("ERROR: Rule msg not found: %s" % (line))
-
-    m = gidPattern.search(line)
-    if m:
-        rule.gid = int(m.group(1))
-
-    rule.references = referencePattern.findall(line)
-
-    # Parse the flowbits.  We record the flowbits this rule may toggle
-    # in the flowbitsProvided rule paramater.  Flowbits that are
-    # checked will be recorded in the flowbitsUsed rule parameter.
-    flowbitMatch = flowbitPattern.findall(line)
-    for fb in flowbitMatch:
-        parts = [p.strip() for p in fb.split(",")]
-        if len(parts) == 1:
-            if parts[0] == "noalert":
-                rule.noalert = True
-        elif len(parts) == 2:
-            if parts[0] in fbProvidedKeywords:
-                rule.flowbitsProvided.append(parts[1])
-            elif parts[0] in fbUsedKeywords:
-                rule.flowbitsUsed.append(parts[1])
-            else:
-                print("WARNING: Unknown flowbit keyword: %s" % (parts[0]))
-                
-    metadata = parse_metadata(line)
+def parse_policies(metadata):
+    policies = {}
     for m in metadata:
         # Extract policy information into its own field.
         if m.startswith("policy"):
-            key, val = [s.strip() for s in string.split(m, " ", maxsplit=1)]
+            key, val = [s.strip() for s in m.split(" ", 1)]
             if key == "policy":
                 parts = [s.strip() for s in val.split(" ")]
                 policy = parts[0]
@@ -126,64 +105,74 @@ def parseRule(line):
                     action = parts[1]
                 except:
                     action = "alert"
-                rule.policies[policy] = action
+                policies[policy] = action
+    return policies
+
+def get_checked_flowbits(flowbits):
+    checked = []
+    for flowbit in flowbits:
+        parts = [p.strip() for p in flowbit.split(",")]
+        if parts[0] in ["isset", "isnotset"]:
+            checked.append(parts[1])
+    return checked
+
+def get_set_flowbits(flowbits):
+    flowbits_set = []
+    for flowbit in flowbits:
+        parts = [p.strip() for p in flowbit.split(",")]
+        if parts[0] in ["set", "unset", "reset"]:
+            flowbits_set.append(parts[1])
+    return flowbits_set
+
+def parse_rule(buf, group=None):
+    """ Build a rule from the provided buffer.
+
+    If the contents of the buffer is successfully parsed as a rule
+    then return a rule object.  Otherwise None will be returned."""
+
+    buf = buf.strip()
+    m = rule_pattern.match(buf)
+    if not m:
+        return None
+
+    rule = Rule(group=group)
+    rule.enabled = not buf.startswith("#")
+    rule.body = m.group(3)
+    rule.action = m.group(2)
+    rule.sid = int(m.group(4))
+    rule.gid = parse_gid(buf, 1)
+    rule.msg = parse_msg(buf)
+    rule.references = reference_pattern.findall(buf)
+    rule.metadata = parse_metadata(buf)
+    rule.policies = parse_policies(rule.metadata)
+    rule.flowbits = flowbit_pattern.findall(buf)
+    rule.flowbits_checked = get_checked_flowbits(rule.flowbits)
+    rule.flowbits_set = get_set_flowbits(rule.flowbits)
 
     return rule
 
-def buildRuleDb(files):
-    """ Build a database of rules from a set of files.
+def build_rule_map(source, rule_map=None):
+    """ Build a map of IDS rules from the map of provided files.
 
-    The files arguments is a dictionary of files keyed by filename.
-    The filename also serves as the group name for each rule found in
-    that file.
+    If a rule_map is provided, parsed rules will be added to it
+    provided there is no existing rule with the same rule key (gid,
+    sid). """
 
-    The return value is a dict of rules keyed by a rule-id.  The
-    rule-id is the tuple (gid, sid).
-    """
-    ruledb = {}
-    for filename in files:
+    assert(type(source) == types.DictType)
+
+    if rule_map == None:
+        rule_map = {}
+
+    for filename in source:
         if filename.endswith(".rules"):
-            for line in StringIO(files[filename]):
-                rule = parseRule(line)
+            for line in io.BytesIO(source[filename]):
+                rule = parse_rule(line, group=filename)
                 if rule:
-                    rule.group = filename
-                    ruledb[(rule.gid, rule.sid)] = rule
-    return ruledb
+                    if rule.key in rule_map:
+                        logger.warn("warning: found duplicate rule ID %s." % (
+                                str(rule.key)))
+                    else:
+                        rule_map[rule.key] = rule
+            
+    return rule_map
 
-def fix_flowbit_dependencies(rules):
-    """ Fix up flowbit dependencies on the in-memory database of rules.
-
-    This is done by generating a list of all the flowbits that are
-    checked by enabled rules, then any rules that modify those
-    flowbits will be enabled. """
-
-    def __fix_flowbit_dependencies():
-        flowbitsRequired = []
-        n = 0
-
-        # Put all required flowbits into a list.
-        for rule in rules.values():
-            if rule.enabled:
-                for fb in rule.flowbitsUsed:
-                    if fb not in flowbitsRequired:
-                        flowbitsRequired.append(fb)
-
-        # Make sure any rule that toggles flowbits in the required set
-        # is enabled.
-        for rule in rules.values():
-            if not rule.enabled:
-                for fb in rule.flowbitsProvided:
-                    if fb in flowbitsRequired:
-                        rule.enabled = True
-                        n += 1
-
-        return n
-
-    count = 0
-    while 1:
-        n = __fix_flowbit_dependencies()
-        if n == 0:
-            break
-        count += n
-
-    return count

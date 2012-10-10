@@ -23,182 +23,91 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import sys
 import os
 import os.path
-import urllib
 import urllib2
 import time
 import getopt
 import re
 import hashlib
 import logging
-import pickle
 import tempfile
 import shutil
-import tarfile
-import subprocess
-import time
-
-try:
-    import progressbar
-    has_progressbar = True
-except:
-    has_progressbar = False
+import glob
 
 from ruleman import config
 from ruleman import util
 from ruleman import snort
+from ruleman import progressmeter
 
 logger = logging.getLogger("ruleman.fetch")
 
-DEFAULT_CHECK_INTERVAL = 15
+valid_content_types = [
+    "application/x-gzip",
+    "application/x-tar",
+    "application/octet-stream",
+    "binary/octet-stream",
+    ]
 
-validContentTypes = ["application/x-gzip",
-                     "application/x-tar",
-                     "application/octet-stream",
-                     "binary/octet-stream"]
+def get_file_md5(filename):
+    """ Return MD5 hex digest for the contexts of filename.
 
-class NullProgressMeter(object):
+    If a file by the name of filename suffixed with .md5 exists, its
+    contents will be used as the MD5 rather than computing the
+    md5. """
 
-    def update(self, transferred, block_size, total_size):
-        pass
+    md5_filename = "%s.md5" % (filename)
+    if os.path.exists(md5_filename):
+        return open(md5_filename).read()
+    return hashlib.md5(open(filename).read()).hexdigest()
 
-    def done(self):
-        pass
-
-class SimpleProgressMeter(object):
-
-    def __init__(self):
-        self.width = 9
-
-    def update(self, transferred, block_size, total_size):
-        val = int((transferred * block_size) / float(total_size) * 100)
-        sys.stdout.write("\b" * (self.width + 1))
-        format = "%%%ds%%%%" % (self.width)
-        sys.stdout.write(format % (val))
-        sys.stdout.flush()
-
-    def done(self):
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-
-class FancyProgressMeter(object):
-
-    def __init__(self):
-        self.bar = progressbar.ProgressBar(
-            widgets=[progressbar.Percentage(),
-                     progressbar.Bar()],
-            maxval=100)
-        self.bar.start()
-
-    def update(self, transferred, block_size, total_size):
-        val = int((transferred * block_size) / float(total_size) * 100)
-        self.bar.update(val)
-
-    def done(self):
-        self.bar.finish()
-
-def get_progress_meter():
-    if not sys.stdout.isatty():
-        return NullProgressMeter()
-    elif has_progressbar:
-        return FancyProgressMeter()
-    else:
-        return SimpleProgressMeter()
-
-def guess_md5_url(url):
-    """ Guess the MD5 URL based on the rule file URL. """
-    extensions = (".tar.gz",
-                  ".tar.bz2",
-                  ".zip")
+def get_md5_url(ruleset):
+    """ Given a ruleset configuration return the URL of the MD5 file
+    which may be a guess if its not provided in the configuration. """
+    if "md5-url" in ruleset:
+        return ruleset["md5-url"]
+    extensions = (".tar.gz", ".tar.bz2", ".zip")
     for ext in extensions:
-        if url.find(ext) >= 0:
-            return url.replace(ext, ext + ".md5")
+        if ruleset["url"].find(ext) >= 0:
+            return ruleset["url"].replace(ext, ext + ".md5")
+    return None
+
+def fetch_to_fileobj(url, fileobj, progress_hook=None):
+    block_size = 8192
+    remote = urllib2.urlopen(url)
+    remote_info = remote.info()
+    content_length = int(remote_info["content-length"])
+    bytes_read = 0
+    blocks_read = 0
+    while 1:
+        buf = remote.read(block_size)
+        if not buf:
+            break
+        bytes_read += len(buf)
+        blocks_read += 1
+        fileobj.write(buf)
+        if progress_hook:
+            progress_hook.update(blocks_read, block_size, content_length)
+    fileobj.flush()
+    return (bytes_read, remote_info)
+
+def fetch_to_buffer(url):
+    """ Fetch the contents of a URL and return it as a buffer. """
+    return urllib2.urlopen(url).read()
+
+def extract_md5(buf):
+    """ Extract the MD5 from a buffer. """
+    if buf:
+        m = re.search("([a-fA-F0-9]+)", buf)
+        if m:
+            return m.group(1)
     return None
 
 def get_ruleset_md5(url):
-    """ Get the MD5 of a ruleset file.  This assumes that VRT style of
-    file where the contents of the URL contains the MD5 in hex
-    format. """
-    try:
-        ruleset = urllib2.urlopen(url)
-    except urllib2.URLError, err:
-        print("Failed to download MD5 URL: %s" % err)
-        return None
-    output = ruleset.read()
-    m = re.search("([a-zA-Z0-9]+)", output)
-    if m:
-        return m.group(1)
-    else:
-        return None
-
-def copy_fileobj(src, dst, expected_size):
-    """ Write the data read from fileobj src to fileobj dst.
-    - expected_size is used to display a progress meter.
-    - the number of bytes read is returned.
-    """
-    read_length = 0
-    progress_meter = get_progress_meter()
-    block_size = 8192
-    block_count = 0
-    while 1:
-        data = src.read(block_size)
-        if not data:
-            break
-        block_count += 1
-        dst.write(data)
-        read_length += len(data)
-        progress_meter.update(block_count, block_size, expected_size)
-    progress_meter.done()
-
-    return read_length
-
-def update_so_stubs(ruleset_ctx, rulefile):
-
-    logging.info("Generating and caching SO rule stubs")
-
-    tmpdir = extract_archive(rulefile)
-    snort_ctx = config.get_snort_ctx(ruleset_ctx["snort"])
-    stubs = snort.generate_stubs(snort_ctx, tmpdir)
-
-    # Copy in the newly generated stubs..  Rename existing SO stubs
-    # with a .orig extension, unless .orig files already exist.
-    for filename in stubs:
-        dest_filename = "%s/%s" % (tmpdir, filename)
-        orig_filename = "%s.orig" % (dest_filename)
-        if os.path.exists(dest_filename) and not os.path.exists(orig_filename):
-            os.rename(dest_filename, orig_filename)
-        open(dest_filename, "w").write(stubs[filename])
-
-    # Use tar to rebuild the tarball.  Its much faster than the
-    # tarfile module.
-    p = subprocess.Popen(
-        "tar cf - -C %s %s | gzip > %s" % (
-            tmpdir, " ".join(os.listdir(tmpdir)), rulefile),
-        shell=True)
-    os.waitpid(p.pid, 0)
-
-    # Cleanup.
-    shutil.rmtree(tmpdir)
-
-    logging.info("SO rule stubs cached")
-
-def extract_archive(filename):
-
-    tmpdir = tempfile.mkdtemp()
-
-    def filename_filter(members):
-        # Simple filter to prevent extraction of files with a leading /.
-        for tarinfo in members:
-            if tarinfo.isreg() and tarinfo.name[0] != "/":
-                yield tarinfo
-
-    tf = tarfile.open(filename)
-    tf.extractall(path=tmpdir, members=filename_filter(tf))
-    tf.close()
-
-    return tmpdir
+    return extract_md5(fetch_to_buffer(url))
 
 def fetch_ruleset(ruleset_ctx, force=False):
     """ Fetch (download) the ruleset described by ruleset_ctx.
@@ -208,80 +117,117 @@ def fetch_ruleset(ruleset_ctx, force=False):
     was available for download.
     """
 
-    logger.info("Fetching ruleset %s." % (ruleset_ctx["name"]))
-
     ruleset_dir = config.get_ruleset_dir(ruleset_ctx)
     if not os.path.exists(ruleset_dir):
         print("Creating directory %s." % ruleset_dir)
         os.makedirs(ruleset_dir)
 
-    latest_filename = "%s/latest" % ruleset_dir
-    last_check_filename = "%s/last-check" % ruleset_dir
+    ruleset_filename = "./rulesets/%s/ruleset.tar.gz" % (ruleset_ctx["name"])
 
-    # Don't retry the download if its been less than 15 minutes.
-    if not force and os.path.exists(last_check_filename):
-        lastUpdateTime = os.stat(last_check_filename).st_mtime
-        diff = int(time.time() - lastUpdateTime)
-        if diff < ruleset_ctx["check-interval"]:
-            logger.info("Skipping %s: Last check only %d seconds ago." % (
-                    ruleset_ctx["name"], diff))
+    if not force and os.path.exists(ruleset_filename):
+
+        last_check_time = os.stat(ruleset_filename).st_mtime
+        last_checked = int(time.time() - last_check_time)
+        if last_checked < ruleset_ctx["fetch-interval"]:
+            logger.info(
+                "Not fetching ruleset %s, last checked only %d seconds ago" % (
+                    ruleset_ctx["name"], last_checked))
             return False
 
-    # If we have a hash-url, check that now.
-    if not force and os.path.exists(latest_filename):    
-        if ruleset_ctx["md5-url"] == None:
-            md5_url = guess_md5_url(ruleset_ctx["url"])
-        else:
-            md5_url = ruleset_ctx["md5-url"]
-        if md5_url:
-            logger.info("Checking MD5 URL: %s" % (md5_url))
-            rulesetHash = get_ruleset_md5(md5_url)
-            print("Ruleset MD5: %s" % rulesetHash)
-            if rulesetHash:
-                localHash = util.get_md5_file(latest_filename)
-                if localHash == rulesetHash:
+        # Check the MD5 URL.
+        try:
+            md5_url = get_md5_url(ruleset_ctx)
+            if md5_url:
+                remote_md5 = extract_md5(fetch_to_buffer(md5_url))
+                local_md5 = get_file_md5(ruleset_filename)
+                if remote_md5 == local_md5:
                     logger.info(
-                        "Ruleset hash unchanged, will not download %s." % (
-                            ruleset_ctx["name"]))
-                    open(last_check_filename, "w").close()
+                        "Not fetching ruleset %s, "
+                        "remote MD5 has not changed" % (ruleset_ctx["name"]))
+                    os.utime(ruleset_filename, None)
                     return False
-
-    
-    dest_file = tempfile.NamedTemporaryFile(dir=ruleset_dir)
+        except Exception as err:
+            logger.warn("Failed to download MD5 URL, will proceed: %s",
+                        err)
+        
+    dest_file = tempfile.NamedTemporaryFile()
 
     logger.info("Fetching %s." % (ruleset_ctx["url"]))
 
+    progress_meter = progressmeter.get_progressmeter()
     try:
-        url = urllib2.urlopen(ruleset_ctx["url"])
-    except urllib2.HTTPError, err:
-        print("ERROR: Failed to fetch %s." % (ruleset_ctx["url"]))
-        print("%s:\n%s" % (err, err.read()))
-        return False
+        bytes_read, remote_info = fetch_to_fileobj(
+            ruleset_ctx["url"], dest_file, progress_meter)
+    except Exception as err:
+        logger.info("Failed to fetch %s: %s" % (
+                ruleset_ctx["url"], err))
+        raise
+    finally:
+        progress_meter.done()
 
-    content_type = url.info()["content-type"]
-    if content_type not in validContentTypes:
-         print("ERROR: Invalid content type %s." % (content_type))
-         return False
-
-    content_length = int(url.info()["content-length"])
-    copy_fileobj(url, dest_file, content_length)
-    url.close()
-    dest_file.flush()
+    if remote_info["content-type"] not in valid_content_types:
+        logger.error(
+            "Discarding downloaded ruleset due to bad content-type: %s" % (
+                remote_info["content-type"]))
+        return
 
     rotate_files(ruleset_dir)
-
     dest_filename = "%s/ruleset.tar.gz" % (ruleset_dir)
-    shutil.copy(dest_file.name, dest_filename)
 
-    if os.path.exists(latest_filename):
-        os.unlink(latest_filename)
-    os.symlink(os.path.basename(dest_filename), latest_filename)
-    open(last_check_filename, "w").close()
+    # Write out a file containing the MD5 checksum before we rebuild
+    # the archive with regenerated rule stubs.
+    open("%s.md5" % (dest_filename), "w").write(get_file_md5(dest_file.name))
 
-    if ruleset_ctx["regen-stubs"]:
-        update_so_stubs(ruleset_ctx, dest_filename)
-        
+    rebuilt_rule_archive = rebuild_so_rule_stubs(dest_file.name)
+
+    logger.debug("Copying %s to %s" % (rebuilt_rule_archive, dest_filename))
+    shutil.copy(rebuilt_rule_archive, dest_filename)
+
     return True
+
+def rebuild_so_rule_stubs(filename):
+    snort_config = config.get_snort()
+    if not snort_config:
+        logger.warn("No snort configuration found. "
+                    "dynamic rule stubs will not be rebuilt.")
+        return filename
+    tmpdir = util.get_tmpdir()
+    logger.debug("Extracting %s to %s" % (filename, tmpdir))
+    util.extract_archive(filename, tmpdir)
+
+    stub_dir = snort.dump_stubs(tmpdir, snort_config["path"], 
+                                snort_config["dynamic-engine"],
+                                snort_config["os-type"])
+    if stub_dir == None:
+        logger.info("No dynamic rules were found, "
+                    "dynamic rule stubs will not be generated.")
+        # No dynamic rules were found.
+        return filename
+
+    old_stub_filenames = glob.glob("%s/so_rules/*.rules" % (tmpdir))
+    for filename in old_stub_filenames:
+        logger.debug("Removing existing SO rule stub %s" % filename)
+        os.unlink(filename)
+
+    new_stub_filenames = glob.glob("%s/*.rules" % (stub_dir))
+    for filename in new_stub_filenames:
+        logger.debug("Adding new SO rule stub so_rules/%s" % (
+                os.path.basename(filename)))
+        new_stub = open(
+            "%s/so_rules/%s" % (tmpdir, os.path.basename(filename)), "w")
+        new_stub.write("# Generated by ruleman at %s\n" % (
+                time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime())))
+        new_stub.write(open(filename).read())
+        new_stub.close()
+        
+    logger.info("Regenerated dynamic rule stubs %s" % (
+            ", ".join([os.path.basename(f) for f in new_stub_filenames])))
+
+    rebuilt_filename = util.get_tmpfilename(suffix=".tar.gz")
+    logger.debug("Creating archive %s from %s" % (rebuilt_filename, tmpdir))
+    util.create_archive(rebuilt_filename, tmpdir)
+
+    return rebuilt_filename
 
 def rotate_files(directory):
     for i in reversed(range(1, 9)):
@@ -289,7 +235,8 @@ def rotate_files(directory):
         next_filename = "%s/ruleset.tar.gz.%d" % (directory, i + 1)
         if os.path.exists(filename):
             print("Renaming %s to %s" % (
-                    os.path.basename(filename), os.path.basename(next_filename)))
+                    os.path.basename(filename), 
+                    os.path.basename(next_filename)))
             os.rename(filename, next_filename)
     
     filename = "%s/ruleset.tar.gz" % (directory)
@@ -299,39 +246,9 @@ def rotate_files(directory):
                 os.path.basename(filename), os.path.basename(next_filename)))
         os.rename(filename, next_filename)
 
-def cleanup(ruleset_ctx):
-    """ Cleanup the ruleset download directory.  Trims previously
-    downloaded rulesets and removes unknown files.
-
-    Could probably be a little cleaner/smarter.
-    """
-
-    def known_file_filter(filename):
-        if filename.startswith("ruleset."):
-            return True
-        if filename in ["latest", "last-check"]:
-            return True
-        return False
-
-    ruleset_dir = config.get_ruleset_dir(ruleset_ctx)
-    if not os.path.exists(ruleset_dir):
-        return
-
-    filelist = os.listdir(ruleset_dir)
-    known_files = filter(known_file_filter, filelist)
-    for filename in filelist:
-        if filename not in known_files:
-            path = "%s/%s" % (ruleset_dir, filename)
-            if os.path.isdir(path):
-                print("Deleting unknown directory %s." % (path))
-                shutil.rmtree(path)
-            else:
-                print("Deleting unkonwn file %s." % (path))
-                os.unlink(path)
-
 def main(args):
     usage = """
-ruleman fetch [options] [ruleset0 ruleset1 ...]
+usage: ruleman fetch [options] [ruleset0 ruleset1 ...]
 
 Options:
 
@@ -346,8 +263,8 @@ not enabld.
 
     try:
         opts, args = getopt.getopt(args, "hf", ["help", "force"])
-    except getopt.GetoptError, err:
-        print >>sys.stderr, usage
+    except getopt.GetoptError as err:
+        print(usage, file=sys.stderr)
         return 1
     for o, a in opts:
         if o in ["-h", "--help"]:
@@ -367,8 +284,7 @@ not enabld.
         if args:
             if ruleset["name"] in args:
                 ret = fetch_ruleset(ruleset, force=force)
-        elif ruleset["enabled"]:
-            cleanup(ruleset)
+        else:
             ret = fetch_ruleset(ruleset, force=force)
         if ret:
             fetched.append(ruleset["name"])

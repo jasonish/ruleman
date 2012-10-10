@@ -1,8 +1,13 @@
 # Rules to disable.
-#
-# This file contains a list rules one per line.  Currently the format
-# is <gid>:<sid> and the GID is required.
-#
-# eg.
-#   1:412
-#   3:12999
+
+# Example: disable a single rule
+#1:412
+
+# Example: disable multiple rules on a single line
+#1:412, 3:18698
+
+# Example: disable all rules in a group
+#group: rules/x11.rules
+
+# Example: disable rules in multiple groups on a single line
+#group: rules/icmp.rules, rules/icmp-info.rules
