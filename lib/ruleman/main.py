@@ -289,7 +289,7 @@ class DeployCommand(object):
     def fix_flowbits(self):
         n = core.fix_flowbit_dependencies(self.rule_map)
         if n:
-            logger.info("Enabled %d rules to satisy flowbit dependencies" % n)
+            logger.info("Enabled %d rules to satisfy flowbit dependencies" % n)
 
     def enabled_rule_count(self):
         count = 0
