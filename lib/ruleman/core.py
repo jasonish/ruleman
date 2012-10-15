@@ -166,3 +166,17 @@ def enable_rules(rule_map, matchers):
 
 def drop_rules(rule_map, matchers):
     return apply_rule_xform(rule_map, matchers, drop_xform)
+
+def build_sid_msg_map(rule_map, file):
+    """ Using rule_map, write out a sid-msg.map file to the provided
+    file. """
+    # Get the keys sorted by sid.
+    keys = sorted(rule_map.keys(), key=lambda k: k[1])
+
+    # Dump a sig-msg.map line for each rule in gid 1 or 3.
+    for key in keys:
+        if not key[0] in [1,3]:
+            continue
+        rule = rule_map[key]
+        parts = [str(rule.sid), rule.msg] + rule.references
+        print("%s" % " || ".join(parts), file=file)
