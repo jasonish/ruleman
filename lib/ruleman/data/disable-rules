@@ -6,8 +6,13 @@
 # Example: disable multiple rules on a single line
 #1:412, 3:18698
 
+# Example: disable a rule with a regular expression, borrowing from pulledpork
+# Regular expressions are case insensitive.
+#re:MS(0[7-9]|10)-\d+
+
 # Example: disable all rules in a group
 #group: rules/x11.rules
 
 # Example: disable rules in multiple groups on a single line
 #group: rules/icmp.rules, rules/icmp-info.rules
+

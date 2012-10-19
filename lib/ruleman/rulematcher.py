@@ -23,6 +23,8 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import re
+
 class InvalidRuleMatchError(Exception):
     pass
 
@@ -39,6 +41,17 @@ class RuleIdRuleMatcher(RuleMatcher):
 
     def match(self, rule):
         if rule.sid == self.sid and rule.gid == self.gid:
+            return True
+        return False
+
+class ReRuleMatcher(RuleMatcher):
+
+    def __init__(self, regex):
+        self.pattern = re.compile(regex, re.IGNORECASE)
+
+    def match(self, rule):
+        m = self.pattern.search(str(rule))
+        if m:
             return True
         return False
 
@@ -77,6 +90,13 @@ def parse_rule_id_matchers(line):
         matchers.append(matcher)
     return matchers
 
+def parse_rule_re_matcher(line):
+    tag, regex = line.split(":", 1)
+    try:
+        return ReRuleMatcher(regex)
+    except Exception as err:
+        raise InvalidRuleMatchError("%s: %s" % (err, line))
+
 def parse_group_name_matchers(line):
     matchers = []
     tag, groups = line.split(":", 1)
@@ -100,6 +120,8 @@ def load_collection_from_fp(fileobj):
             matchers += parse_rule_id_matchers(line)
         elif tag == "group":
             matchers += parse_group_name_matchers(line)
+        elif tag == "re":
+            matchers.append(parse_rule_re_matcher(line))
         else:
             raise InvalidRuleMatchError(line)
     return RuleMatcherCollection(matchers)

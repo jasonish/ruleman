@@ -317,18 +317,17 @@ class DeployCommand(object):
                     policy, str(inline).lower()))
             enabled, disabled, dropped = core.set_policy(
                 self.rule_map, policy, inline=inline)
-            logger.info(" %d rules enabled" % (enabled))
-            logger.info(" %d rules disabled" % (disabled))
+            logger.info("%d rules enabled" % (enabled))
+            logger.info("%d rules disabled" % (disabled))
             if inline:
-                logger.info(" %d rules set to drop" % (dropped))
+                logger.info("%d rules set to drop" % (dropped))
 
     def apply_disable_rules(self):
-        count = 0
         for actionfile in self.profile["disable-rules"]:
             logger.info("Applying disable definitions in %s" % (actionfile))
             matchers = rulematcher.load_collection_from_file(actionfile)
             count = core.disable_rules(self.rule_map, matchers)
-            logger.info(" Disabled %d rules" % (count))
+            logger.info("Disabled %d rules" % (count))
 
     def apply_enable_rules(self):
         count = 0
@@ -336,7 +335,7 @@ class DeployCommand(object):
             logger.info("Applying enable definitions in %s" % (actionfile))
             matchers = rulematcher.load_collection_from_file(actionfile)
             count = core.enable_rules(self.rule_map, matchers)
-            logger.info(" Enabled %d rules" % (count))
+            logger.info("Enabled %d rules" % (count))
 
     def apply_drop_rules(self):
         count = 0
@@ -344,7 +343,7 @@ class DeployCommand(object):
             logger.info("Applying drop definitions in %s" % (actionfile))
             matchers = rulematcher.load_collection_from_file(actionfile)
             count = core.drop_rules(self.rule_map, matchers)
-            logger.info(" Set %d rules to drop" % (count))
+            logger.info("Set %d rules to drop" % (count))
 
     def run(self):
         self.profile = config.get_profile()

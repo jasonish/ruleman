@@ -222,6 +222,31 @@ class TestRuleIdRuleMatcher(unittest.TestCase):
             rulematcher.InvalidRuleMatchError,
             rulematcher.parse_rule_id_matchers, "1:412, 1:*")
 
+class TestReRuleMatch(unittest.TestCase):
+
+    test_rule0_raw = """# alert tcp $EXTERNAL_NET any -> $HOME_NET 53 (msg:"GPL DNS zone transfer TCP"; flow:to_server,established; content:"|00 00 FC|"; offset:15; reference:arachnids,212; reference:cve,1999-0532; reference:nessus,10595; classtype:attempted-recon; sid:2100255; rev:14;)"""
+
+    def setUp(self):
+        self.test_rule0 = rules.parse_rule(self.test_rule0_raw)
+
+    def test_badre(self):
+        self.assertRaises(
+            rulematcher.InvalidRuleMatchError,
+            rulematcher.parse_rule_re_matcher, "re:.*(")
+
+    def test_some(self):
+        matcher = rulematcher.parse_rule_re_matcher("re:GPL DNS")
+        self.assertTrue(matcher.match(self.test_rule0))
+
+        matcher = rulematcher.parse_rule_re_matcher("re:DNS")
+        self.assertTrue(matcher.match(self.test_rule0))
+            
+        matcher = rulematcher.parse_rule_re_matcher("re:cve,1999-\d\d\d\d")
+        self.assertTrue(matcher.match(self.test_rule0))
+
+        matcher = rulematcher.parse_rule_re_matcher("re:cve,1999-0533")
+        self.assertFalse(matcher.match(self.test_rule0))
+
 class TestGroupNameMatcher(unittest.TestCase):
 
     def test_single_group(self):
@@ -266,4 +291,5 @@ group: x11.rules, emerging-malware.rules
         self.assertFalse(matchers.match(MockRule(group="deleted.rules")))
 
 if __name__ == "__main__":
-    unittest.main()
+    suite = unittest.defaultTestLoader.loadTestsFromName(__name__)
+    unittest.TextTestRunner(verbosity=2).run(suite)
