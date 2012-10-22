@@ -1,150 +1,126 @@
-#! /usr/bin/env python
+# Copyright (c) 2011 Jason Ish
+# All rights reserved.
 #
-# This Python script will generate a report describing the changes
-# between one ruleset (the old one) and another ruleset (the new one).
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+# IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+from __future__ import print_function
 
 import sys
-import tarfile
-import difflib
-from cStringIO import StringIO
-import re
+
+from ruleman import core
+from ruleman import util
 
 def usage(fileobj=sys.stderr):
-    print >>fileobj, ("USAGE: %s <old> <new>" % sys.argv[0])
+    print("USAGE: %s <old> <new>" % sys.argv[0], file=fileobj)
 
-def getRuleMsg(rule):
-    """ Return the rule msg (description). """
-    m = re.search("msg:\s?\"(.*?)\";", rule)
-    if m:
-        return m.group(1)
-    return rule
-
-rulePattern = re.compile("^#?\s?alert.*sid:\s?(\d+)")
-gidPattern = re.compile("gid:\s?(\d+)")
-
-def loadRules(ruledb, buf):
-    """ Load the rules in buf into the dict ruledb keyed by the
-    'gid:sid'.
-
-    Just some simple regex matching, not that fastest rule parsing but
-    works. """
-    inio = StringIO(buf)
-    for line in inio:
-        line = line.strip()
-        m = rulePattern.match(line)
-        if m:
-            sid = m.group(1)
-            m = gidPattern.match(line)
-            if m:
-                gid = m.group(1)
-            else:
-                gid = "1"
-            sidgid = "%s:%s" % (gid, sid)
-            ruledb[sidgid] = line
-
-def tarToDict(filename):
-    """ Convert a tarfile into a dict of file contents keyed by
-    filenames. """
-    files = {}
-    tf = tarfile.open(filename)
-    for member in tf:
-        if member.isreg():
-            files[member.name] = tf.extractfile(member).read()
-    tf.close()
-    return files
-
-def getModifiedRules(oldRuleDb, newRuleDb):
+def get_modified_rules(old_rules, new_rules):
     """ Return a list of rules that have been modified. """
     rules = []
-    for gidsid in newRuleDb:
-        if gidsid in oldRuleDb and oldRuleDb[gidsid] != newRuleDb[gidsid]:
-            rules.append(gidsid)
+    for key in new_rules:
+        if key in old_rules and str(old_rules[key]) != str(new_rules[key]):
+            rules.append(key)
     return rules
 
-def getEnabledRules(oldRuleDb, newRuleDb):
+def get_enabled_rules(old_rules, new_rules):
     """ Return a list of rules that have gone from disabled to
     enabled. """
     rules = []
-    for gidsid in newRuleDb:
-        if gidsid in oldRuleDb:
-            if oldRuleDb[gidsid].startswith("#") and \
-                    not newRuleDb[gidsid].startswith("#"):
-                rules.append(gidsid)
+    for key in new_rules:
+        if key in old_rules:
+            if not old_rules[key].enabled and new_rules[key].enabled:
+                rules.append(key)
     return rules
 
-def getDisabledRules(oldRuleDb, newRuleDb):
+def get_disabled_rules(old_rules, new_rules):
     """ Return a list of rules that have gone from enabled to
     disabled. """
     rules = []
-    for gidsid in newRuleDb:
-        if gidsid in oldRuleDb:
-            if not oldRuleDb[gidsid].startswith("#") and \
-                    newRuleDb[gidsid].startswith("#"):
-                rules.append(gidsid)
+    for key in new_rules:
+        if key in old_rules:
+            if old_rules[key].enabled and not new_rules[key].enabled:
+                rules.append(key)
     return rules
 
 def main(args, fileobj=sys.stdout):
     try:
-        oldFile = args[0]
-        newFile = args[1]
+        old_file = args[0]
+        new_file = args[1]
     except:
         usage()
         return 1
 
-    oldRuleset = tarToDict(oldFile)
-    newRuleset = tarToDict(newFile)
-    oldRuleDb = {}
-    newRuleDb = {}
-    for f in oldRuleset:
-        if f.endswith(".rules"):
-            loadRules(oldRuleDb, oldRuleset[f])
-    print >>fileobj, ("Loaded %d rules from old ruleset." % len(oldRuleDb))
-    for f in newRuleset:
-        if f.endswith(".rules"):
-            loadRules(newRuleDb, newRuleset[f])
-    print >>fileobj, ("Loaded %d rules from new ruleset." % len(newRuleDb))
+    old_files = util.archive_to_dict(old_file)
+    new_files = util.archive_to_dict(new_file)
+
+    old_rules = core.load_ruleset_rules({"files": old_files})
+    new_rules = core.load_ruleset_rules({"files": new_files})
 
     # Find new files.
-    files = set(newRuleset).difference(set(oldRuleset))
-    print >>fileobj, ("\nNew files: (%d)" % len(files))
+    files = set(new_files).difference(set(old_files))
+    print("\nNew files: (%d)" % len(files), file=fileobj)
     for f in files: 
-        print >>fileobj, ("- %s" % f)
+        print("- %s" % f, file=fileobj)
 
     # Find removed files.
-    files = set(oldRuleset).difference(set(newRuleset))
-    print >>fileobj, ("\nRemoved files: (%d)" % len(files))
+    files = set(old_files).difference(set(new_files))
+    print("\nRemoved files: (%d)" % len(files), file=fileobj)
     for f in files: 
-        print >>fileobj, ("- %s" % f)
+        print("- %s" % f, file=fileobj)
 
     # New rules.
-    rules = set(newRuleDb).difference(set(oldRuleDb))
-    print >>fileobj, ("\nNew rules: (%d)" % len(rules))
-    for gidsid in rules:
-        print >>fileobj, ("- %s: %s" % (gidsid, getRuleMsg(newRuleDb[gidsid])))
+    rules = set(new_rules).difference(set(old_rules))
+    print("\nNew rules: (%d)" % len(rules), file=fileobj)
+    for gid, sid in rules:
+        print("- %d:%d: %s" % (gid, sid, new_rules[(gid, sid)].msg),
+              file=fileobj)
 
     # Deleted rules.
-    rules = set(oldRuleDb).difference(set(newRuleDb))
-    print >>fileobj, ("\nDeleted rules: (%d)" % len(rules))
-    for gidsid in rules:
-        print >>fileobj, ("- %s: %s" % (gidsid, getRuleMsg(oldRuleDb[gidsid])))
+    rules = set(old_rules).difference(set(new_rules))
+    print("\nDeleted rules: (%d)" % len(rules), file=fileobj)
+    for gid, sid in rules:
+        print("- %d:%d: %s" % (gid, sid, old_rules[(gid, sid)].msg), 
+              file=fileobj)
 
     # Modified rules.
-    rules = getModifiedRules(oldRuleDb, newRuleDb)
-    print >>fileobj, ("\nModified rules: (%d)" % len(rules))
-    for gidsid in rules:
-        print >>fileobj, ("- %s: %s" % (gidsid, getRuleMsg(newRuleDb[gidsid])))
+    rules = get_modified_rules(old_rules, new_rules)
+    print("\nModified rules: (%d)" % len(rules), file=fileobj)
+    for gid, sid in rules:
+        print("- %d:%d: %s" % (gid, sid, new_rules[(gid, sid)].msg),
+              file=fileobj)
 
     # Rules now enabled.
-    rules = getEnabledRules(oldRuleDb, newRuleDb)
-    print >>fileobj, ("\nRules now enabled: (%d)" % len(rules))
-    for gidsid in rules:
-        print >>fileobj, ("- %s: %s" % (gidsid, getRuleMsg(newRuleDb[gidsid])))
+    rules = get_enabled_rules(old_rules, new_rules)
+    print("\nRules now enabled: (%d)" % len(rules), file=fileobj)
+    for gid, sid in rules:
+        print("- %d:%d: %s" % (gid, sid, new_rules[(gid, sid)].msg), 
+              file=fileobj)
 
     # Rules now disabled.
-    rules = getDisabledRules(oldRuleDb, newRuleDb)
-    print >>fileobj, ("\nRules now disabled: (%d)" % len(rules))
-    for gidsid in rules:
-        print >>fileobj, ("- %s: %s" % (gidsid, getRuleMsg(newRuleDb[gidsid])))
+    rules = get_disabled_rules(old_rules, new_rules)
+    print("\nRules now disabled: (%d)" % len(rules), file=fileobj)
+    for gid, sid in rules:
+        print("- %d:%d: %s" % (gid, sid, new_rules[(gid, sid)].msg), 
+              file=fileobj)
 
     return 0
 

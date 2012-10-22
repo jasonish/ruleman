@@ -548,6 +548,9 @@ def main(args):
         return DumpDynamicRulesCommand(args[1:]).run()
     elif args[0] == "export-ruleset":
         return ExportRulesetCommand(args[1:]).run()
+    elif args[0] == "diff":
+        from ruleman import rulechanges
+        return rulechanges.main(args[1:])
     else:
         print("\nerror: unknown command: %s" % (args[0]), file=sys.stderr)
         usage(sys.stderr)
