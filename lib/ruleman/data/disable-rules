@@ -16,3 +16,5 @@
 # Example: disable rules in multiple groups on a single line
 #group: rules/icmp.rules, rules/icmp-info.rules
 
+# Example: Filename patterns can be used when disabling groups.
+group: rules/icmp*.rules

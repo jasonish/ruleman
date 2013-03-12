@@ -24,6 +24,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import re
+import fnmatch
 
 class InvalidRuleMatchError(Exception):
     pass
@@ -61,7 +62,7 @@ class GroupNameMatcher(RuleMatcher):
         self.group = group
 
     def match(self, rule):
-        if rule.group == self.group:
+        if rule.group and fnmatch.fnmatch(rule.group, self.group):
             return True
         return False
 

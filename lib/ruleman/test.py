@@ -263,6 +263,19 @@ class TestGroupNameMatcher(unittest.TestCase):
         self.assertTrue(matchers[2].match(MockRule(
                     group="emerging-malware.rules")))
 
+    def test_fnmatch_all_group(self):
+        matchers = rulematcher.parse_group_name_matchers("group:*")
+        self.assertEquals(1, len(matchers))
+        self.assertTrue(matchers[0].match(MockRule(group="icmp.rules")))
+
+    def test_fnmatch_some_group(self):
+        matchers = rulematcher.parse_group_name_matchers(
+            "group: rules/icmp*.rules")
+        self.assertEquals(1, len(matchers))
+        self.assertTrue(matchers[0].match(MockRule(group="rules/icmp.rules")))
+        self.assertTrue(matchers[0].match(MockRule(
+                    group="rules/icmp-info.rules")))
+
 class TestRuleMatcherCollection(unittest.TestCase):
 
     def test_basic(self):
