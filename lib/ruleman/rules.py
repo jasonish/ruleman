@@ -176,3 +176,21 @@ def build_rule_map(source, rule_map=None):
             
     return rule_map
 
+if __name__ == "__main__":
+    import sys
+    import time
+    start_time = time.time()
+    count = 0
+    for filename in sys.argv[1:]:
+        with open(filename) as input:
+            for line in input:
+                try:
+                    rule = parse_rule(line)
+                    if rule:
+                        count += 1
+                        #print(rule)
+                except:
+                    print("Failed to parse: %s" % (line))
+                    raise
+    print("Parsed %d rules: elapse time=%.3f" % (
+            count, time.time() - start_time))
