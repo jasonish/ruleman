@@ -1,5 +1,5 @@
 #! /usr/bin/env python
-
+#
 # Copyright (c) 2011 Jason Ish
 # All rights reserved.
 #
@@ -26,12 +26,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
-import os
-
-# This is so we can run out of the source directory, no matter what
-# the users current directory is.
-sys.path.insert(
-    0, os.path.dirname(os.path.abspath(sys.argv[0])) + "/lib")
 
 from ruleman import main
 
