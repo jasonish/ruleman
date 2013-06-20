@@ -23,6 +23,8 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import sys
 import re
 import logging
@@ -47,6 +49,15 @@ rule_pattern = re.compile(
     "\((?P<options>.*)\)\s*" 	# Options
     % "|".join(actions))
 
+# Another compiled pattern to detect preprocessor rules.  We could
+# construct the general rule re to pick this up, but its much faster
+# this way.
+decoder_rule_pattern = re.compile(
+    "^(?P<enabled>#)*\s*"	# Enabled/disabled
+    "(?P<action>%s)\s*"		# Action
+    "\((?P<options>.*)\)\s*" 	# Options
+    % "|".join(actions))
+
 # Compiled regular expression to break out the rule options.  Its
 # faster if we just pull out what we need.
 options = ("msg", "gid", "sid", "rev", "flowbits", "metadata")
@@ -54,7 +65,10 @@ option_pattern = re.compile(
     "(%s):(.*?)(?<!\\\);" % "|".join(options))
 
 def parse(buf):
-    m = rule_pattern.search(buf)
+    """ 
+    Parse a single rule for a string buffer. 
+    """
+    m = rule_pattern.match(buf) or decoder_rule_pattern.match(buf)
     if not m:
         return
 
@@ -70,21 +84,35 @@ def parse(buf):
 
     return rule
 
+def parse_fp(fileobj):
+    """
+    Parse multiple rules from a file object, one rule per line.
+
+    Return a list of rules (lines that were parsed into a rule).
+    """
+    rules = []
+    for line in fileobj:
+        rule = parse(line)
+        if rule:
+            rules.append(rule)
+    return rules
+
+def parse_file(filename):
+    """
+    Parse multiple rules from a file provided by named.
+
+    This is just a wrapper from parse_fp.
+    """
+    with open(filename) as fileobj:
+        return parse_fp(fileobj)
+
 # For crude testing.
 if __name__ == "__main__":
     import time
     start_time = time.time()
     count = 0
     for filename in sys.argv[1:]:
-        with open(filename) as input:
-            for line in input:
-                try:
-                    rule = parse(line)
-                    if rule:
-                        count += 1
-                        #print(rule)
-                except:
-                    print("Failed to parse: %s" % (line))
-                    raise
-    print("Parsed %d rules: elapse time=%.3f" % (
+        rules = parse_file(filename)
+        count += len(rules)
+    print("Parsed %d rules: elapsed time=%.3f" % (
             count, time.time() - start_time))
