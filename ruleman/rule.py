@@ -23,7 +23,11 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-""" Module for parsing Snort-like rules. """
+""" Module for parsing Snort-like rules. 
+
+The parsing is done around regular expressions.  Its a bit dirty, but
+does the job for now.
+"""
 
 from __future__ import print_function
 
@@ -60,11 +64,15 @@ decoder_rule_pattern = re.compile(
     r"\((?P<options>.*)\)\s*" 	# Options
     % "|".join(actions))
 
-# Compiled regular expression to break out the rule options.  Its
-# faster if we just pull out what we need.
-options = ("msg", "gid", "sid", "rev", "flowbits", "metadata")
-option_pattern = re.compile(
-    "(%s):(.*?);" % "|".join(options))
+# Regular expressions to pick out options.
+option_patterns = (
+    re.compile("(msg)\s*:\s*(.*?);"),
+    re.compile("(gid)\s*:\s*(\d+);"),
+    re.compile("(sid)\s*:\s*(\d+);"),
+    re.compile("(rev)\s*:\s*(\d+);"),
+    re.compile("(metadata)\s*:\s*(.*?);"),
+    re.compile("(flowbits)\s*:\s*(.*?);"),
+)
 
 class Rule(dict):
     """ Class representing a rule. """
@@ -99,18 +107,19 @@ def parse(buf):
     rule = Rule(enabled=True if m.group("enabled") is None else False,
                 action=m.group("action"))
 
-    print(m.group("options"))
-    for opt, val in option_pattern.findall(m.group("options")):
-        print("opt: %s" % (opt))
-        print("val: %s" % (val))
-        if opt in ["gid", "sid", "rev"]:
-            rule[opt] = int(val)
-        elif opt == "msg":
-            rule[opt] = val
-        elif opt == "metadata":
-            rule[opt] = [v.strip() for v in val.split(",")]
-        elif opt == "flowbits":
-            rule.flowbits.append(val)
+    options = m.group("options")
+    for p in option_patterns:
+        m = p.search(options)
+        if m:
+            opt, val = m.groups()
+            if opt in ["gid", "sid", "rev"]:
+                rule[opt] = int(val)
+            elif opt == "metadata":
+                rule[opt] = [v.strip() for v in val.split(",")]
+            elif opt == "flowbits":
+                rule.flowbits.append(val)
+            else:
+                rule[opt] = val
 
     return rule
 
@@ -143,16 +152,33 @@ def parse_file(filename):
 def main():
     """ For crude testing. """
     import time
+    import flowbit
     logging.basicConfig(logLevel=logging.DEBUG)
     start_time = time.time()
     count = 0
+    ruleset = {}
     for filename in sys.argv[1:]:
-        rules = parse_file(filename)
-        for r in rules:
-            print(r.id)
-        count += len(rules)
+        ruleset[filename] = parse_file(filename)
+        count += len(ruleset[filename])
     print("Parsed %d rules: elapsed time=%.3f" % (
             count, time.time() - start_time))
+
+    enabled_count = 0
+    for group in ruleset:
+        for rule in ruleset[group]:
+            if rule.enabled:
+                enabled_count += 1
+    print("Rules enabled: %d" % (enabled_count))
+
+    enabled = flowbit.resolve_dependencies(ruleset)
+    print("%d rules enabled." % len(enabled))
+
+    enabled_count = 0
+    for group in ruleset:
+        for rule in ruleset[group]:
+            if rule.enabled:
+                enabled_count += 1
+    print("Rules enabled: %d" % (enabled_count))
 
 if __name__ == "__main__":
     sys.exit(main())
