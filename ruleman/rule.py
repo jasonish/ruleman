@@ -23,6 +23,8 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+""" Module for parsing Snort-like rules. """
+
 from __future__ import print_function
 
 import sys
@@ -38,31 +40,53 @@ actions = (
 # Compiled regular expression to detect a rule and break out some of
 # its parts.
 rule_pattern = re.compile(
-    "^(?P<enabled>#)*\s*"	# Enabled/disabled
-    "(?P<action>%s)\s*"		# Action
-    "[^\s]*\s*"			# Protocol
-    "[^\s]*\s*"			# Source address(es)
-    "[^\s]*\s*"			# Source port
-    "[-><]+\s*"			# Direction
-    "[^\s]*\s*"			# Destination address(es)
-    "[^\s]*\s*" 		# Destination port
-    "\((?P<options>.*)\)\s*" 	# Options
+    r"^(?P<enabled>#)*\s*"	# Enabled/disabled
+    r"(?P<action>%s)\s*"	# Action
+    r"[^\s]*\s*"		# Protocol
+    r"[^\s]*\s*"		# Source address(es)
+    r"[^\s]*\s*"		# Source port
+    r"[-><]+\s*"		# Direction
+    r"[^\s]*\s*"		# Destination address(es)
+    r"[^\s]*\s*" 		# Destination port
+    r"\((?P<options>.*)\)\s*" 	# Options
     % "|".join(actions))
 
 # Another compiled pattern to detect preprocessor rules.  We could
 # construct the general rule re to pick this up, but its much faster
 # this way.
 decoder_rule_pattern = re.compile(
-    "^(?P<enabled>#)*\s*"	# Enabled/disabled
-    "(?P<action>%s)\s*"		# Action
-    "\((?P<options>.*)\)\s*" 	# Options
+    r"^(?P<enabled>#)*\s*"	# Enabled/disabled
+    r"(?P<action>%s)\s*"	# Action
+    r"\((?P<options>.*)\)\s*" 	# Options
     % "|".join(actions))
 
 # Compiled regular expression to break out the rule options.  Its
 # faster if we just pull out what we need.
 options = ("msg", "gid", "sid", "rev", "flowbits", "metadata")
 option_pattern = re.compile(
-    "(%s):(.*?)(?<!\\\);" % "|".join(options))
+    "(%s):(.*?);" % "|".join(options))
+
+class Rule(dict):
+    """ Class representing a rule. """
+
+    def __init__(self, enabled=None, action=None):
+        dict.__init__(self)
+        self["enabled"] = enabled
+        self["action"] = action
+        self["gid"] = 1
+        self["sid"] = None
+        self["rev"] = None
+        self["msg"] = None,
+        self["flowbits"] = []
+        self["metadata"] = []
+
+    def __getattr__(self, name):
+        return self[name]
+
+    @property
+    def id(self):
+        """ The ID of the rule (gid, sid). """
+        return (int(self.gid), int(self.sid))
 
 def parse(buf):
     """ 
@@ -72,15 +96,21 @@ def parse(buf):
     if not m:
         return
 
-    rule = {
-        "gid": "1",
-        "enabled": True if m.group("enabled") is None else False,
-        "action": m.group("action"),
-        }
+    rule = Rule(enabled=True if m.group("enabled") is None else False,
+                action=m.group("action"))
 
+    print(m.group("options"))
     for opt, val in option_pattern.findall(m.group("options")):
-        if opt in ["msg", "gid", "sid", "rev"]:
+        print("opt: %s" % (opt))
+        print("val: %s" % (val))
+        if opt in ["gid", "sid", "rev"]:
+            rule[opt] = int(val)
+        elif opt == "msg":
             rule[opt] = val
+        elif opt == "metadata":
+            rule[opt] = [v.strip() for v in val.split(",")]
+        elif opt == "flowbits":
+            rule.flowbits.append(val)
 
     return rule
 
@@ -92,9 +122,13 @@ def parse_fp(fileobj):
     """
     rules = []
     for line in fileobj:
-        rule = parse(line)
-        if rule:
-            rules.append(rule)
+        try:
+            rule = parse(line)
+            if rule:
+                rules.append(rule)
+        except:
+            logger.error("failed to parse rule: %s" % (line))
+            raise
     return rules
 
 def parse_file(filename):
@@ -106,13 +140,19 @@ def parse_file(filename):
     with open(filename) as fileobj:
         return parse_fp(fileobj)
 
-# For crude testing.
-if __name__ == "__main__":
+def main():
+    """ For crude testing. """
     import time
+    logging.basicConfig(logLevel=logging.DEBUG)
     start_time = time.time()
     count = 0
     for filename in sys.argv[1:]:
         rules = parse_file(filename)
+        for r in rules:
+            print(r.id)
         count += len(rules)
     print("Parsed %d rules: elapsed time=%.3f" % (
             count, time.time() - start_time))
+
+if __name__ == "__main__":
+    sys.exit(main())
