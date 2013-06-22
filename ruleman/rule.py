@@ -45,6 +45,7 @@ actions = (
 # its parts.
 rule_pattern = re.compile(
     r"^(?P<enabled>#)*\s*"	# Enabled/disabled
+    r"(?P<raw>"
     r"(?P<action>%s)\s*"	# Action
     r"[^\s]*\s*"		# Protocol
     r"[^\s]*\s*"		# Source address(es)
@@ -53,6 +54,7 @@ rule_pattern = re.compile(
     r"[^\s]*\s*"		# Destination address(es)
     r"[^\s]*\s*" 		# Destination port
     r"\((?P<options>.*)\)\s*" 	# Options
+    r")"
     % "|".join(actions))
 
 # Another compiled pattern to detect preprocessor rules.  We could
@@ -60,8 +62,10 @@ rule_pattern = re.compile(
 # this way.
 decoder_rule_pattern = re.compile(
     r"^(?P<enabled>#)*\s*"	# Enabled/disabled
+    r"(?P<raw>"
     r"(?P<action>%s)\s*"	# Action
     r"\((?P<options>.*)\)\s*" 	# Options
+    r")"
     % "|".join(actions))
 
 # Regular expressions to pick out options.
@@ -87,6 +91,7 @@ class Rule(dict):
         self["msg"] = None,
         self["flowbits"] = []
         self["metadata"] = []
+        self["raw"] = None
 
     def __getattr__(self, name):
         return self[name]
@@ -95,6 +100,9 @@ class Rule(dict):
     def id(self):
         """ The ID of the rule (gid, sid). """
         return (int(self.gid), int(self.sid))
+
+    def __repr__(self):
+        return "%s%s" % ("" if self.enabled else "# ", self.raw)
 
 def parse(buf):
     """ 
@@ -109,9 +117,7 @@ def parse(buf):
 
     options = m.group("options")
     for p in option_patterns:
-        m = p.search(options)
-        if m:
-            opt, val = m.groups()
+        for opt, val in p.findall(options):
             if opt in ["gid", "sid", "rev"]:
                 rule[opt] = int(val)
             elif opt == "metadata":
@@ -120,6 +126,8 @@ def parse(buf):
                 rule.flowbits.append(val)
             else:
                 rule[opt] = val
+
+    rule["raw"] = m.group("raw")
 
     return rule
 
