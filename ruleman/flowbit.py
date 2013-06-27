@@ -53,7 +53,7 @@ def set_required_flowbits(ruleset, required):
 
     A list of the rules that were enabled is returned.
     """
-    enabled = []
+    enabled = set()
     for group in ruleset:
         for rule in ruleset[group]:
             if not rule.enabled and rule.flowbits:
@@ -62,7 +62,7 @@ def set_required_flowbits(ruleset, required):
                     if tokens[0] in ["set", "setx", "unset", "reset"]:
                         if set(tokens[1:]).issubset(required):
                             rule.enabled = True
-                            enabled.append(rule)
+                            enabled.add(rule)
     return enabled
 
 def resolve_dependencies(ruleset):

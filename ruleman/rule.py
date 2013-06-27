@@ -101,6 +101,9 @@ class Rule(dict):
         """ The ID of the rule (gid, sid). """
         return (int(self.gid), int(self.sid))
 
+    def __hash__(self):
+        return  self["raw"].__hash__()
+
     def __repr__(self):
         return "%s%s" % ("" if self.enabled else "# ", self.raw)
 
