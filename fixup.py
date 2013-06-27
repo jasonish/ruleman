@@ -15,12 +15,12 @@ import ruleman.rule
 import ruleman.flowbit
 import ruleman.snort
 
+SNORT_PATH = "/opt/nsm/bin/snort"
+SNORT_DYNAMIC_ENGINE = "/opt/nsm/lib/snort_dynamicengine/libsf_engine.so"
+
 def main(args=sys.argv[1:]):
 
-    snort = ruleman.snort.Snort(
-        "/opt/nsm/bin/snort",
-        "/opt/nsm/lib/snort_dynamicengine/libsf_engine.so")
-    print(snort.get_version())
+    snort = ruleman.snort.Snort(SNORT_PATH, SNORT_DYNAMIC_ENGINE)
 
     in_rules = args[0]
     if os.path.isdir(in_rules):
@@ -30,9 +30,19 @@ def main(args=sys.argv[1:]):
         print("Loading files from archive %s." % (in_rules))
         files = ruleman.fileset.fileset_from_archive(in_rules)
 
-    snort.generate_dynamic_rules("FC-14/x86-64", files)
+    snort.path = "/bin/asdf"
+    generated_rules = snort.generate_dynamic_rules("FC-14/x86-64", files)
+    for filename in generated_rules:
+        print(filename)
 
-    return
+    for filename in generated_rules:
+        rules0 = ruleman.rule.parse_fp(io.BytesIO(files[filename]))
+        rules1 = ruleman.rule.parse_fp(io.BytesIO(generated_rules[filename]))
+        if len(rules0) != len(rules1):
+            print("Found %d rules in original %s; %d in new." % (
+                    len(rules0), filename, len(rules1)))
+
+    #return
 
     # Parse the rules.
     rules = {}
