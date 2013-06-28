@@ -15,7 +15,7 @@ class TestRule(unittest.TestCase):
         self.assertEqual(rule.action, "alert")
         self.assertEqual(rule.sid, 2014929)
         self.assertEqual(rule.rev, 1)
-        self.assertEqual(rule.msg, "\"ET CURRENT_EVENTS Request to .in FakeAV Campaign June 19 2012 exe or zip\"")
+        self.assertEqual(rule.msg, "ET CURRENT_EVENTS Request to .in FakeAV Campaign June 19 2012 exe or zip")
         self.assertEqual(len(rule.metadata), 2)
         self.assertEqual(rule.metadata[0], "stage")
         self.assertEqual(rule.metadata[1], "hostile_download")
