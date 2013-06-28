@@ -6,15 +6,81 @@ import io
 import ruleman.fileset
 import ruleman.rule
 
+def compare(ruleset1, ruleset2):
+
+    changelog = {
+        "new-rules-active": [],
+        "new-rules-inactive": [],
+        "updated-rules-active": [],
+        "updated-rules-inactive": [],
+        "now-active-rules": [],
+        "now-inactive-rules": [],
+        "removed-rules": [],
+        }
+
+    for rule in ruleset2.itervalues():
+        # First look for new rules.
+        if rule.id not in ruleset1:
+            if rule.enabled:
+                changelog["new-rules-active"].append(rule)
+            else:
+                changelog["new-rules-inactive"].append(rule)
+        else:
+            # Look for changes to the rules.
+            old = ruleset1[rule.id]
+
+            # Look for rules that were modified, other than just
+            # toggled from active/inactive.
+            if old.raw != rule.raw:
+                if rule.enabled:
+                    changelog["updated-rules-active"].append(rule)
+                else:
+                    changelog["updated-rules-inactive"].append(rule)
+
+            # Look for rules that were toggled.
+            if not old.enabled and rule.enabled:
+                changelog["now-active-rules"].append(rule)
+            elif old.enabled and not rule.enabled:
+                changelog["now-inactive-rules"].append(rule)
+
+    # Final check for rules that have been removed.
+    for rule_id in ruleset1:
+        if rule_id not in ruleset2:
+            changelog["removed-rules"].append(ruleset1[rule_id])
+
+    return changelog
+
+def load_ruleset(filename):
+    files = ruleman.fileset.load(filename)
+    rules = {}
+    dupes = []
+    for filename in [fn for fn in files if fn.endswith(".rules")]:
+        for rule in ruleman.rule.parse_fp(io.BytesIO(files[filename])):
+            rule.group = filename
+            if rule.id in rules:
+                dupes.append(rule)
+            else:
+                rules[rule.id] = rule
+    return (files, rules, dupes)
+
 def render_rule_list(prefix, rules):
     for rule in sorted(rules, key=lambda r: r.group):
         print("%s[%d:%d] %s" % (
                 prefix, rule.gid, rule.sid, rule.msg))
 
 def main(args=sys.argv[1:]):
-    
-    fileset0 = ruleman.fileset.load(args[0])
-    fileset1 = ruleman.fileset.load(args[1])
+
+    fileset0, rules0, dupes0 = load_ruleset(args[0])
+    if dupes0:
+        for dupe in dupes0:
+            print("Warning: Found duplicate SID %s in %s." % (
+                    dupe.id, args[0]))
+
+    fileset1, rules1, dupes1 = load_ruleset(args[1])
+    if dupes1:
+        for dupe in dupes1:
+            print("Warning: Found duplicate SID %s in %s." % (
+                    dupe.id, args[1]))
 
     # Get the files that in fileset1 but not in fileset0 (new files).
     new_files = set(fileset1).difference(set(fileset0))
@@ -30,76 +96,32 @@ def main(args=sys.argv[1:]):
     for filename in sorted(removed_files):
         print("  - %s" % (filename))
 
-    rules0 = {}
-    for filename in fileset0:
-        if filename.endswith(".rules"):
-            rules = ruleman.rule.parse_fp(io.BytesIO(fileset0[filename]))
-            for rule in rules:
-                if rule.id in rules0:
-                    print("WARNING: Duplicate rule ID found: %s" % (rule.id))
-                else:
-                    rules0[rule.id] = rule
+    changelog = compare(rules0, rules1)
 
-    rules1 = {}
-    for filename in fileset1:
-        if filename.endswith(".rules"):
-            rules = ruleman.rule.parse_fp(io.BytesIO(fileset1[filename]))
-            for rule in rules:
-                rule.group = filename
-                if rule.id in rules1:
-                    print("WARNING: Duplicate rule ID found: %s" % (rule.id))
-                else:
-                    rules1[rule.id] = rule
+    print("* New active rules: %d" % (len(changelog["new-rules-active"])))
+    render_rule_list("  - ", changelog["new-rules-active"])
 
-    # Find the new rules.
-    new_rules_enabled = []
-    new_rules_disabled = []
-    updated_enabled_rules = []
-    updated_disabled_rules = []
-    now_active_rules = []
-    now_inactive_rules = []
-    for rule_id in rules1:
-        if rule_id not in rules0:
-            rule = rules1[rule_id]
-            if rule.enabled:
-                new_rules_enabled.append(rule)
-            else:
-                new_rules_disabled.append(rule)
-        else:
-            rule0 = rules0[rule_id]
-            rule1 = rules1[rule_id]
+    print("* New inactive rules: %d" % (len(changelog["new-rules-inactive"])))
+    render_rule_list("  - ", changelog["new-rules-inactive"])
 
-            # Record which rules have been turned active.
-            if not rule0.enabled and rule1.enabled:
-                now_active_rules.append(rule1)
+    print("* Updated active rules: %d" % (
+            len(changelog["updated-rules-active"])))
+    render_rule_list("  - ", changelog["updated-rules-active"])
 
-            # Record rules that are no longer active.
-            if rule0.enabled and not rule1.enabled:
-                now_inactive_rules.append(rule)
+    print("* Updated inactive rules: %d" % (
+            len(changelog["updated-rules-inactive"])))
+    render_rule_list("  - ", changelog["updated-rules-inactive"])
 
-            if rule0.raw != rule1.raw:
-                if rule1.enabled:
-                    updated_enabled_rules.append(rule1)
-                else:
-                    updated_disabled_rules.append(rule1)
+    print("* Rules changed inactive -> active: %d" % (
+            len(changelog["now-active-rules"])))
+    render_rule_list("  - ", changelog["now-active-rules"])
 
-    print("* New active rules: %d" % (len(new_rules_enabled)))
-    render_rule_list("  - ", new_rules_enabled)
+    print("* Rules changed active-> inactive: %d" % (
+            len(changelog["now-inactive-rules"])))
+    render_rule_list("  - ", changelog["now-inactive-rules"])
 
-    print("* New inactive rules: %d" % (len(new_rules_disabled)))
-    render_rule_list("  - ", new_rules_disabled)
-
-    print("* Updated active rules: %d" % (len(updated_enabled_rules)))
-    render_rule_list("  - ", updated_enabled_rules)
-
-    print("* Updated inactive rules: %d" % (len(updated_disabled_rules)))
-    render_rule_list("  - ", updated_disabled_rules)
-
-    print("* Rules changed inactive -> active: %d" % (len(now_active_rules)))
-    render_rule_list("  - ", now_active_rules)
-
-    print("* Rules changed active-> inactive: %d" % (len(now_inactive_rules)))
-    render_rule_list("  - ", now_inactive_rules)
+    print("* Removed rules: %d" % (len(changelog["removed-rules"])))
+    render_rule_list("  - ", changelog["removed-rules"])
 
 if __name__ == "__main__":
     sys.exit(main())
