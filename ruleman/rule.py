@@ -70,7 +70,7 @@ decoder_rule_pattern = re.compile(
 
 # Regular expressions to pick out options.
 option_patterns = (
-    re.compile("(msg)\s*:\s*(.*?);"),
+    re.compile("(msg)\s*:\s*\"(.*?)\";"),
     re.compile("(gid)\s*:\s*(\d+);"),
     re.compile("(sid)\s*:\s*(\d+);"),
     re.compile("(rev)\s*:\s*(\d+);"),
@@ -101,6 +101,10 @@ class Rule(dict):
         """ The ID of the rule (gid, sid). """
         return (int(self.gid), int(self.sid))
 
+    def brief(self):
+        return "[%d:%d] %s%s" % (
+            self.gid, self.sid, "" if self.enabled else "# ", self.msg)
+
     def __hash__(self):
         return  self["raw"].__hash__()
 
@@ -130,7 +134,7 @@ def parse(buf):
             else:
                 rule[opt] = val
 
-    rule["raw"] = m.group("raw")
+    rule["raw"] = m.group("raw").strip()
 
     return rule
 

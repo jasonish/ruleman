@@ -50,3 +50,9 @@ def fileset_from_archive(filename):
     tf.close()
     return files
     
+def load(path):
+    if os.path.isfile(path):
+        return fileset_from_archive(path)
+    elif os.path.isdir(path):
+        return fileset_from_directory(path)
+        
