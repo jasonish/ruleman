@@ -26,7 +26,11 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import sys
+import os
 
-from ruleman import main
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))))
 
-sys.exit(main.main(sys.argv[1:]))
+from ruleman.apps import rulemanapp
+
+sys.exit(rulemanapp.main(sys.argv[1:]))

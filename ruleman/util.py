@@ -1,5 +1,3 @@
-#! /usr/bin/env python
-#
 # Copyright (c) 2011-2013 Jason Ish
 # All rights reserved.
 #
@@ -25,22 +23,41 @@
 # IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+import urllib2
+import hashlib
 
-import sys
-import pdb
-import ConfigParser
+def get(url, fileobj, progress_hook=None):
+    """ Get the contents of a URL storing the content in the provide
+    file like object.
 
-def dump_config():
-    config = ConfigParser.SafeConfigParser()
-    config.read("ruleman.conf")
-    for section in config.sections():
-        for option in config.options(section):
-            print("%s.%s = %s" % (section, option, config.get(section, option)))
-    pdb.set_trace()
+    Optionally call a progress_hook which is a function that will be
+    called with the arguments content_length, data_read.
 
-def main():
-    dump_config()
+    A tuple is returned with the first item being the number of bytes
+    read, and the second item being the value of the .info() method
+    from the urllib2.urlopen method.
+    """
+    remote = urllib2.urlopen(url)
+    remote_info = remote.info()
+    content_length = int(remote_info["content-length"])
+    bytes_read = 0
+    while 1:
+        buf = remote.read(8192)
+        if not buf:
+            break
+        bytes_read += len(buf)
+        fileobj.write(buf)
+        if progress_hook:
+            progress_hook(content_length, bytes_read)
+    fileobj.flush()
+    remote.close()
+    return bytes_read, remote_info
 
-if __name__ == '__main__':
-    main()
+def md5sum_fp(fileobj):
+    """ Calculate the md5 sum for the contents of the passed in file
+    like object. """
+    return hashlib.md5(fileobj.read()).hexdigest()
+
+def md5sum(filename):
+    """ Calculate the md5 sum for the file provided by name. """
+    return md5sum_fp(open(filename))
